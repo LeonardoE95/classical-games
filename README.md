@@ -1,5 +1,11 @@
 # Classical Games
 
-Games implemented so far
+List of games, some of which I implemented, and some of which I would like one day to implement
 
-- Snake
+- [X] Snake
+- [ ] Tic-tac-toe
+- [ ] Chess
+- [ ] Sudoku
+- [ ] Tetris
+- [ ] Pacman
+
