@@ -1,0 +1,602 @@
+#+TITLE: Chess in C (ft. SDL2)
+#+AUTHOR: Leonardo Tamiano
+
+* Idea
+  The basic idea is to implement the classical chess game in C using
+  the library SDL2.
+
+* Game Info
+  The board in chess is an 8x8 board.
+
+  There are two types players: the white player and the black player.
+
+  Each player has 16 distinct pieces, each of which has a particular
+  class type, which determinies how it can move on the board. The
+  division is done as follows:
+
+  - PAWNS, these are 8   (P)
+  - ROOKS, these are 2   (R)
+  - KNIGHTS, these are 2 (K)
+  - BISHOPS, these are 2 (B)
+  - QUEEN, only 1        (Q)
+  - KING, only 1         (K)
+
+  Their initial positioning is as follows:
+
+  P P P P P P P P
+  R K B Q K B K R
+
+* Development Log
+** DONE Find assets
+   [2021-11-27 sab 08:56]
+
+   I was thinking of getting both chess pieces as assets as well as
+   the chess board.
+
+   But, thinking about it: what if I just manually draw the board
+   instead? How bad would it look like?
+
+   --------------------------------
+   [2021-11-27 sab 09:11]
+
+   I checked and apparently the board does not look bad at all if I
+   manually draw it.
+
+   As far as the other assets go, these look good enough for my taste,
+   and they should be free to use.
+
+   https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces
+
+** DONE Display board
+   [2021-11-27 sab 08:57]
+
+   To display the board I used the following code
+
+   #+begin_src c
+void render_board(SDL_Renderer *renderer) {
+  int counter, col;
+  int colors[] = {GRID_COLOR_1, GRID_COLOR_2};
+  
+  for (int x = 0 ; x < BOARD_WIDTH; x++) {
+    counter = x % 2;
+    for (int y = 0; y < BOARD_HEIGHT; y++) {
+      col = colors[counter];
+      scc(SDL_SetRenderDrawColor(renderer, HEX_COLOR(col)));
+
+      SDL_Rect rect = {
+	(int) floorf(x * CELL_WIDTH),
+	(int) floorf(y * CELL_HEIGHT),
+	(int) floorf(CELL_WIDTH),
+	(int) floorf(CELL_HEIGHT),
+      };
+
+      scc(SDL_RenderFillRect(renderer, &rect));
+
+      counter = (counter + 1) % 2;
+    }
+  }
+}
+   #+end_src
+
+** DONE Display pieces
+   [2021-11-27 sab 09:18]
+
+   In the link shown previously I could download ~.svg~ assets. Then I
+   found the following article
+
+   https://lazyfoo.net/tutorials/SDL/06_extension_libraries_and_loading_other_image_formats/index.php
+
+   which discusses how to deal with png images using SDL2.
+
+   Maybe I can do the following:
+
+   1. First I conver the .svg downloaded assets into png.
+
+      https://stackoverflow.com/questions/9853325/how-to-convert-a-svg-to-a-png-with-imagemagick
+
+      #+begin_src sh
+inkscape -w 45 -h 45 black_king.svg -o output.png
+      #+end_src
+
+   2. Then I import the png assets following the above linked guide.
+
+      https://gigi.nullneuron.net/gigilabs/loading-images-in-sdl2-with-sdl_image/
+
+   ------------------------
+   [2021-11-28 dom 08:52]
+
+   I managed to display some pieces, although the quality is not that
+   great. To do so I used the ~SDL_image~ library.
+
+   #+begin_src sh
+sudo pacman -S sdl2_image
+   #+end_src
+
+   and I added the SDL2_image to the pkg-config in the Makefile.
+
+   After that the changes to the code were pretty minimal:
+
+   - Imported the library
+
+     #+begin_src c
+#include <SDL2/SDL_image.h>
+     #+end_src
+
+   - Initialized it in ~main()~
+
+     #+begin_src c
+  // init image SDL
+  IMG_Init(IMG_INIT_PNG);
+
+  SDL_Surface *image = IMG_Load("../assets/black_king.svg");
+  SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, image);
+     #+end_src
+
+   - And then I can draw to the ~renderer~ as follows
+
+     #+begin_src c
+    int x = 0;
+    int y = 0;
+    
+    SDL_Rect chess_pos = {
+	(int) floorf(x * CELL_WIDTH),
+	(int) floorf(y * CELL_HEIGHT),
+	(int) floorf(CELL_WIDTH),
+	(int) floorf(CELL_HEIGHT),
+    };
+
+    SDL_RenderCopy(renderer, texture, NULL, &chess_pos);
+     #+end_src
+
+   - Once I'm done with the texture I cna destroy it with
+
+     #+begin_src c
+  SDL_DestroyTexture(texture);
+  SDL_FreeSurface(image);
+     #+end_src
+
+** TODO Improve assets/pieces quality
+   [2021-11-28 dom 08:54]
+
+   The quality of the ~png~ for the pieces is pretty shitty, need to
+   improve it somehow.
+
+   Maybe find better assets?
+
+** DONE Initialize board with correct pieces
+   [2021-11-28 dom 08:55]
+
+   Written all the code for initialization and basic rendering.
+
+   I've pretty much handled it like this:
+
+   - I have an enum to discriminate between the different pieces
+
+     #+begin_src c
+typedef enum {
+  B_KING = 0,
+  B_QUEEN,
+  B_ROOK,
+  B_BISHOP,
+  B_KNIGHT,
+  B_PAWN,
+
+  W_KING,
+  W_QUEEN,
+  W_ROOK,
+  W_BISHOP,
+  W_KNIGHT,
+  W_PAWN,
+
+  EMPTY,
+
+} PieceType;
+     #+end_src
+
+   - Each piece is a struct with some info, like the position, what
+     type of piece it is, and stuff regarding to rendering.
+
+     #+begin_src c
+typedef struct {
+  PieceType type;
+  Pos pos;
+
+  SDL_Surface *image;
+  SDL_Texture *texture;
+} Piece;
+     #+end_src
+
+   - The game, for now, has a bunch of arrays.
+
+     #+begin_src c
+typedef struct {
+  Piece *board[BOARD_WIDTH][BOARD_HEIGHT];
+  PieceType w_score[16];
+  PieceType b_score[16];
+  int quit;
+} Game;
+     #+end_src
+
+   As far as the initialization of the pieces is concerned, I have
+   created two look-up tables which I use:
+
+   1. One to map the piece type to the ~.png~ asset which represents
+      that type.
+
+      #+begin_src c
+const char *TYPE2PNG[] = {
+    [B_KING]    = "../assets/black_king.png",
+    [B_QUEEN]   = "../assets/black_queen.png",
+    [B_ROOK]    = "../assets/black_rook.png",
+    [B_BISHOP]  = "../assets/black_bishop.png",
+    [B_KNIGHT]  = "../assets/black_knight.png",
+    [B_PAWN]    = "../assets/black_pawn.png",
+    // ---------
+    [W_KING]    = "../assets/white_king.png",
+    [W_QUEEN]   = "../assets/white_queen.png",
+    [W_ROOK]    = "../assets/white_rook.png",
+    [W_BISHOP]  = "../assets/white_bishop.png",
+    [W_KNIGHT]  = "../assets/white_knight.png",
+    [W_PAWN]    = "../assets/white_pawn.png",      
+};
+      #+end_src
+
+   2. The other to define the initial layout of the board.
+
+      #+begin_src c
+const PieceType DEFAULT_BOARD[BOARD_HEIGHT][BOARD_WIDTH] = {
+  {B_ROOK, B_KNIGHT, B_BISHOP, B_QUEEN, B_KING, B_BISHOP, B_KNIGHT, B_ROOK},
+  {B_PAWN, B_PAWN  , B_PAWN  , B_PAWN , B_PAWN, B_PAWN  , B_PAWN  , B_PAWN},
+  
+  {EMPTY , EMPTY   , EMPTY   , EMPTY  , EMPTY , EMPTY   , EMPTY   , EMPTY},
+  {EMPTY , EMPTY   , EMPTY   , EMPTY  , EMPTY , EMPTY   , EMPTY   , EMPTY},
+  {EMPTY , EMPTY   , EMPTY   , EMPTY  , EMPTY , EMPTY   , EMPTY   , EMPTY},
+  {EMPTY , EMPTY   , EMPTY   , EMPTY  , EMPTY , EMPTY   , EMPTY   , EMPTY},
+  
+  {W_PAWN, W_PAWN  , W_PAWN  , W_PAWN , W_PAWN, W_PAWN  , W_PAWN  , W_PAWN},
+  {W_ROOK, W_KNIGHT, W_BISHOP, W_QUEEN, W_KING, W_BISHOP, W_KNIGHT, W_ROOK},  
+};
+      #+end_src
+
+   -----------------------------------
+
+   With all of these data structures in place the initialization of the board
+   is pretty smooth
+
+   #+begin_src c
+void init_game(Game *game) {
+  game->quit = 0;
+
+  for (int x = 0; x < BOARD_WIDTH; x++) {
+    for (int y = 0; y < BOARD_HEIGHT; y++) {
+      // NOTE: have to swap coordinates of default board to accomodate
+      // SDL2 coordinate scheme
+      PieceType t = DEFAULT_BOARD[y][x];
+      game->board[x][y] = t != EMPTY ? init_piece(t, (Pos){x, y}) : NULL;
+    }
+  }
+}
+   #+end_src
+
+   while the initialization of the single pieces goes as follows
+
+   #+begin_src c
+// Used to istantiate a particular chess piece depending on its type.
+// NOTE: the texture instantiation is de-ferred to the first call of
+// render_piece().
+// NOTE: assume t != EMPTY (always)
+Piece *init_piece(PieceType t, Pos init_pos) {
+  assert(t != EMPTY && "Piece shouldn't be EMPTY!");
+  
+  Piece *p = calloc(1, sizeof(Piece));
+  p->pos = init_pos;
+  p->image = img_p(IMG_Load(TYPE2PNG[t]));
+  
+  return p;
+}
+   #+end_src
+
+   -----------------------------------
+
+   Finally, the rendering is also pretty smooth
+
+   #+begin_src c
+void render_game(SDL_Renderer *renderer, Game *game) {
+  render_board(renderer);
+  render_pieces(renderer, game);
+}
+   #+end_src
+
+   #+begin_src c
+void render_piece(SDL_Renderer *renderer, Piece *p) {
+  // was the piece already rendered?
+  if (!p->texture) {
+    p->texture = SDL_CreateTextureFromSurface(renderer, p->image);
+  }
+
+  
+  SDL_Rect chess_pos = {
+    (int) floorf(p->pos.x * CELL_WIDTH),
+    (int) floorf(p->pos.y * CELL_HEIGHT),
+    (int) floorf(CELL_WIDTH),
+    (int) floorf(CELL_HEIGHT),
+  };
+
+  SDL_RenderCopy(renderer, p->texture, NULL, &chess_pos);
+}
+   #+end_src
+
+   #+begin_src c
+void render_pieces(SDL_Renderer *renderer, Game *game) {
+  for (int x = 0; x < BOARD_WIDTH; x++) {
+    for (int y = 0; y < BOARD_HEIGHT; y++) {
+      if (game->board[x][y]) {
+	render_piece(renderer, game->board[x][y]);
+      }
+    }
+  }
+}
+   #+end_src
+   
+** DONE Handle logic of basic movement for each pieces
+   [2021-11-28 dom 08:56]
+
+   Need to understand if a given move is legal or not. This is based
+   on various information, such as:
+
+   - The type of pieces and the type of movement.
+
+   - If there are any collisions or not.
+
+   ----------------------
+   [2021-11-29 lun 08:55]
+
+   I started to implement some functions to deal with basic movement.
+
+   Still need to handle all the things related to collision however.
+
+   ----------------------
+   [2021-12-01 mer 16:12]
+
+   Finally finished the logic movement, to do so I implemented the
+   following functions
+
+   #+begin_src c
+int check_move_validity(Game *game, Piece *p, Pos new_pos);
+Dir compute_movement_dir(Pos start_pos, Pos end_pos);
+int check_obstacles_in_path(Game *game, Pos start_pos, Pos end_pos, Dir dir);
+void move_piece(Game *game, Piece *p, Pos new_pos);
+   #+end_src
+
+** DONE Handle eating mechanics
+   [2021-11-28 dom 08:56]
+
+   ----------------------
+   [2021-12-01 mer 16:13]
+
+   The eating mechanic is implemented in the ~move_piece~ function.
+
+   #+begin_src c
+// The move is valid, do it.
+if(game->board[new_pos.x][new_pos.y]) {
+  Piece *eaten_piece = game->board[new_pos.x][new_pos.y];
+  update_player_score(game->selected_player, eaten_piece->type);
+  destroy_piece(eaten_piece);
+ }
+   #+end_src
+
+** TODO Learn how to check memory leaks with valgrind
+   [2021-11-29 lun 06:41]
+
+   The basic problem is that by default SDL2 appears to have some
+   memory leaks, thus with ~Valgrind~ I'm having a bit of an hard time
+   understanding if I did any mistakes.
+
+** DONE Learn little highlight on selected piece
+   [2021-11-29 lun 07:10]
+
+   At each time in the game a piece can be selected by the player. We
+   have to somehow indicate that, maybe by drawing a little square on
+   the side of the position on which the piece resides.
+
+   -------------------
+
+   I managed to do this with the following function
+
+   #+begin_src c
+void render_pos_highlight(SDL_Renderer *renderer, Pos pos) {
+  sdl2_c(SDL_SetRenderDrawColor(renderer, HEX_COLOR(HIGHLIGHT_COLOR)));
+
+  int coords[][4] = {
+    // ----
+    // top 
+    {pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT,
+     pos.x * CELL_WIDTH + CELL_WIDTH , pos.y * CELL_HEIGHT},
+    
+    {pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT + 1,
+     pos.x * CELL_WIDTH + CELL_WIDTH , pos.y * CELL_HEIGHT + 1},
+    
+    {pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT + 2,
+     pos.x * CELL_WIDTH + CELL_WIDTH , pos.y * CELL_HEIGHT + 2},
+
+    // ----
+    // bottom
+    {pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT + CELL_HEIGHT,
+     pos.x * CELL_WIDTH + CELL_WIDTH , pos.y * CELL_HEIGHT + CELL_HEIGHT},
+    
+    {pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT + CELL_HEIGHT - 1,
+     pos.x * CELL_WIDTH + CELL_WIDTH , pos.y * CELL_HEIGHT + CELL_HEIGHT - 1},
+    
+    {pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT + CELL_HEIGHT - 2,
+     pos.x * CELL_WIDTH + CELL_WIDTH , pos.y * CELL_HEIGHT + CELL_HEIGHT - 2},
+
+    // ----
+    // left
+    {pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT,
+     pos.x * CELL_WIDTH              , pos.y * CELL_HEIGHT + CELL_HEIGHT},
+    
+    {pos.x * CELL_WIDTH + 1          , pos.y * CELL_HEIGHT,
+     pos.x * CELL_WIDTH + 1          , pos.y * CELL_HEIGHT + CELL_HEIGHT},
+    
+    {pos.x * CELL_WIDTH + 2          , pos.y * CELL_HEIGHT,
+     pos.x * CELL_WIDTH + 2          , pos.y * CELL_HEIGHT + CELL_HEIGHT},
+
+    // ----
+    // right
+    {pos.x * CELL_WIDTH + CELL_WIDTH     , pos.y * CELL_HEIGHT,
+     pos.x * CELL_WIDTH + CELL_WIDTH     , pos.y * CELL_HEIGHT + CELL_HEIGHT},
+    
+    {pos.x * CELL_WIDTH + CELL_WIDTH - 1 , pos.y * CELL_HEIGHT,
+     pos.x * CELL_WIDTH + CELL_WIDTH - 1 , pos.y * CELL_HEIGHT + CELL_HEIGHT},
+    
+    {pos.x * CELL_WIDTH + CELL_WIDTH - 2 , pos.y * CELL_HEIGHT,
+     pos.x * CELL_WIDTH + CELL_WIDTH - 2 , pos.y * CELL_HEIGHT + CELL_HEIGHT},
+    
+  };
+
+  for (int i = 0; i < 4*3; i++) {
+    SDL_RenderDrawLine(renderer,
+		       floorf(coords[i][0]), floorf(coords[i][1]),
+		       floorf(coords[i][2]), floorf(coords[i][3]));
+  }
+}
+   #+end_src
+
+** TODO Determine Check mate condition
+   [2021-12-01 mer 16:14]
+
+   Need to understand when the game is over so that a new game can be
+   started.
+
+   ---------------------
+   [2021-12-01 mer 16:34]
+
+   For now I simply check if the king was eaten and if it was I end
+   the game. This however is not how things should be: I should end
+   the game when the king is in check mate.
+
+   To implement this kind of behavior I should develop a system for
+   checking all legal moves in the board at any given time.
+
+** DONE Determine legal moves
+   [2021-12-03 ven 14:08]
+
+   I added an array to the game struct to contain all the possible
+   legal moves for the current selected piece.
+
+   #+begin_src c
+  // NOTE: at most a piece can move in <= 8 * 4 = 32 different positions
+  Pos valid_moves[MAX_VALID_MOVES];
+  int valid_moves_count;
+   #+end_src
+
+   I then added the following two functions which are used to update
+   the valid moves after a piece has been selected.
+
+   #+begin_src c
+void update_valid_moves(Game *game);
+void add_valid_move(Game *game, Pos new_pos);
+   #+end_src
+
+   The implementation for ~update_valid_moves()~ is pretty
+   straight-forward: I iterate over all possible position and check
+   for each one if the piece can be moved.
+
+   #+begin_src c
+void update_valid_moves(Game *game) {
+  game->valid_moves_count = 0;
+  
+  if (!game->selected_piece) {
+    // No piece is selected, therefore no moves are valid.
+    return; 
+  }
+
+  // iterate over all possible position and check if piece can be
+  // moved there.
+  for (int x = 0; x < BOARD_WIDTH; x++) {
+    for (int y = 0; y < BOARD_HEIGHT; y++) {
+      Pos p = (Pos) {.x = x, .y = y};
+      Piece *eating_piece = game->board[p.x][p.y];
+
+      // TODO: instead of checking here if we're trying to move on the
+      // player's own pieces, we should instead do that within the
+      // check_move_validity().
+      if (check_move_validity(game, game->selected_piece, p) &&
+	  (!eating_piece || (eating_piece && !SAME_PLAYER(eating_piece, game->selected_piece)))) {
+	add_valid_move(game, p);
+      }
+    }
+  }
+
+  return;
+}
+   #+end_src
+
+   Then, in the ~update_selected_piece()~ function I call the function
+   after selecting the piece
+
+   #+begin_src c
+  if (piece) {
+    if ((IS_PIECE_BLACK(piece->type) && IS_PLAYER_BLACK(game)) || (IS_PIECE_WHITE(piece->type) && IS_PLAYER_WHITE(game))) {
+      game->selected_piece = piece;
+      update_valid_moves(game);
+    } else {
+      game->selected_piece = NULL;
+    }
+  }
+   #+end_src
+   
+** DONE Highlight legal moves
+   [2021-12-02 gio 11:46]
+
+   After determining which moves are legal, I want to highlight those
+   so that its clear where you can move the piece.
+
+   ----------------
+   [2021-12-03 ven 14:11]
+
+   To highlight the legal moves I simply re-used the function
+   ~render_pos_highlight()~ but with a different color.
+
+   #+begin_src c
+void render_valid_moves(SDL_Renderer *renderer, const Game *game) {
+  for (int i = 0; i < game->valid_moves_count; i++) {
+    Pos p = game->valid_moves[i];
+    render_pos_highlight(renderer, p, HEX_COLOR(HIGHLIGHT_COLOR_2));
+  }
+}
+   #+end_src
+   
+** TODO Implement special moves
+   [2021-12-02 gio 11:45]
+
+   The special movies in chess are the following one:
+
+   - when pawn can move two squares forward at the start.
+
+   - when king and rook exchange place. (tower)
+
+   - ???
+
+** TODO Implement Forsyth-Edwards notation (FEN)
+   [2021-12-02 gio 11:47]
+
+   Example of such notation:
+
+   #+begin_example
+7k/3N2qp/b5r1/2p1Q1N1/Pp4PK/7P/1P3p2/6r1w -- 7 4
+   #+end_example
+
+   The number represent empty spaces, while to each letter is
+   associated a particular chess piece as follows:
+
+   P -> pawn
+   N -> knight
+   B -> bishop
+   R -> rook
+   Q -> queen
+   K -> king
+
+   ~Uppercase~ is used ofr white pieces ("PNBRQK"), while ~lowercase~ is
+   used for black piece ("pnbrqk").  
+   
