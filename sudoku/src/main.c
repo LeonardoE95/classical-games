@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <math.h>
+#include <stdint.h>
 
 #define SCREEN_WIDTH  900
 #define SCREEN_HEIGHT 900
@@ -27,38 +28,46 @@ typedef enum {
   V_7,
   V_8,
   V_9,
+  V_INVALID,  
 } Value;
 
 typedef struct {
-  int x;
-  int y;  
+  size_t x;
+  size_t y;
 } Pos;
 
 typedef struct {
-  int cols;
-  int rows;
+  size_t cols;
+  size_t rows;
   Value *grid;
+  
   Pos select;
 } Game;
 
 // ---------------
 // headers
 
-Game game_init(int cols, int rows);
+Game game_init(size_t cols, size_t rows);
 void game_close(Game g);
 Game game_set_selection(Game g, Pos pos);
-void grid_fill(Game g, Value val);
-void grid_rand(Game g, int low, int high);
-Pos coords_to_pos(Vector2 vpos);
+void game_set_value(Game g, Value value);
 
-void grid_lines_render(Game g);
-void grid_values_render(Game g);
+void grid_fill(Game g, Value val);
+void grid_rand(Game g, size_t low, size_t high);
+
+void grid_render_lines(Game g);
+void grid_render_values(Game g);
 void game_render(Game g);
+
+Pos coords_to_pos(Vector2 vpos);
+Value char_to_value(char keyPress);
+
+#define HAS_SELECTED_CELL(g) (((g).select.x != -1) && ((g).select.y != -1))
 
 // ---------------
 // Logic
 
-Game game_init(int cols, int rows) {
+Game game_init(size_t cols, size_t rows) {
   Game g = { 0 };
   g.cols = cols;
   g.rows = rows;
@@ -77,20 +86,26 @@ Game game_set_selection(Game g, Pos pos) {
   return g;
 }
 
+void game_set_value(Game g, Value value) {
+  if (!HAS_SELECTED_CELL(g) || value == V_INVALID) { return g; }
+  Pos select = g.select;
+  g.grid[select.y * g.cols + select.x] = value;
+}
+
 void grid_fill(Game g, Value val) {
-  for (int x = 0; x < g.rows; x++) {
-    for (int y = 0; y < g.cols; y++) {
-      g.grid[x * g.cols + y] = V_NONE;
+  for (size_t y = 0; y < g.rows; y++) {
+    for (size_t x = 0; x < g.cols; x++) {
+      g.grid[y * g.cols + x] = V_NONE;
     }
   }
 }
 
-void grid_rand(Game g, int low, int high) {
-  for (int x = 0; x < g.rows; x++) {
-    for (int y = 0; y < g.cols; y++) {
-      g.grid[x * g.cols + y] = low + (rand() % (high - low));
+void grid_rand(Game g, size_t low, size_t high) {
+  for (size_t y = 0; y < g.rows; y++) {
+    for (size_t x = 0; x < g.cols; x++) {
+      g.grid[y * g.cols + x] = low + (rand() % (high - low));
     }
-  }  
+  }
 }
 
 Pos coords_to_pos(Vector2 vpos) {
@@ -100,59 +115,67 @@ Pos coords_to_pos(Vector2 vpos) {
   return pos;
 }
 
+Value char_to_value(char keyPress) {
+  if (keyPress < '0' || keyPress > '9') {
+    return V_INVALID;
+  } else {
+    return (Value)(keyPress - '0');
+  }
+}
 
 // ---------------
 // Rendering
 
-void grid_lines_render(Game g) {
+void grid_render_lines(Game g) {
 
-  for (int x = 1; x < g.rows; x++) {
-    Vector2 startPos = { 0, x*CELL_HEIGHT };
-    Vector2 endPos = { SCREEN_WIDTH, x*CELL_HEIGHT };
-    int thickness = x % 3 == 0 ? 3 : 1;
+  size_t thick_bold = 5;
+  size_t thick_light = 1;
+
+  // horizontal lines (moving through rows)
+  for (size_t y = 1; y < g.rows; y++) {
+    Vector2 startPos = { 0, y*CELL_HEIGHT };
+    Vector2 endPos = { SCREEN_WIDTH, y*CELL_HEIGHT };
+    size_t thickness = y % 3 == 0 ? thick_bold : thick_light;
     DrawLineEx(startPos, endPos, thickness, BLACK);
   }
 
-  for (int y = 1; y < g.cols; y++) {
-    Vector2 startPos = { y*CELL_WIDTH, 0 };
-    Vector2 endPos = { y*CELL_WIDTH, SCREEN_HEIGHT };
-    int thickness = y % 3 == 0 ? 3 : 1;
+  // vertical lines (moving through cols)  
+  for (size_t x = 1; x < g.cols; x++) {
+    Vector2 startPos = { x*CELL_WIDTH, 0 };
+    Vector2 endPos = { x*CELL_WIDTH, SCREEN_HEIGHT };
+    size_t thickness = x % 3 == 0 ? thick_bold : thick_light;    
     DrawLineEx(startPos, endPos, thickness, BLACK);
   }
 }
 
-void grid_values_render(Game g) {
-  for (int x = 0; x < g.rows; x++) {
-    for (int y = 0; y < g.cols; y++) {
-      Value val = g.grid[x * g.cols + y];
-
+void grid_render_values(Game g) {
+  for (size_t y = 0; y < g.rows; y++) {
+    for (size_t x = 0; x < g.cols; x++) {
+      Value val = g.grid[y * g.cols + x];
       if (val != V_NONE) {
 	char text[80];
-	sprintf(text, "%d", val);
-
-	int posX = floorf(y * CELL_WIDTH + CELL_WIDTH / 3);
-	int posY = floorf(x * CELL_HEIGHT + CELL_HEIGHT / 5);
-      
+	sprintf(text, "%u", val);
+	size_t posX = floorf(x * CELL_WIDTH + CELL_WIDTH / 3);
+	size_t posY = floorf(y * CELL_HEIGHT + CELL_HEIGHT / 3);
 	DrawText(text, posX, posY, 50, BLACK);
-      }      
+      }
     }
-  }  
+  }
 }
 
 void game_render(Game g) {
-  if ((g.select.x != -1) && (g.select.y != -1)) {
-    int posX = g.select.x * CELL_WIDTH;
-    int posY = g.select.y * CELL_HEIGHT;
-    DrawRectangle(posX, posY, CELL_WIDTH, CELL_HEIGHT, LIGHTGRAY);
+  if (HAS_SELECTED_CELL(g)) {
+    size_t posX = g.select.x * CELL_WIDTH;
+    size_t posY = g.select.y * CELL_HEIGHT;
+    DrawRectangle(posX, posY, CELL_WIDTH, CELL_HEIGHT, LIGHTGRAY);      
   }
   
-  grid_lines_render(g);
-  
-  grid_values_render(g);
+  grid_render_lines(g);
+  grid_render_values(g);
 }
 
 //------------------------------------------------------------------------------------
-// Program main entry point
+// Program main entry posize_t
 //------------------------------------------------------------------------------------
 int main(void)
 {
@@ -162,16 +185,7 @@ int main(void)
   srand(time(NULL));
 
   Game g = game_init(BOARD_COLS, BOARD_ROWS);
-  // grid_rand(g, 0, 9);  
-    
-  // for(int x = 0; x < g.rows; x++) {
-  //   for(int y = 0; y < g.cols; y++) {
-  //     printf("%d ", g.grid[x * g.cols + y]);
-  //   }
-  //   printf("\n");
-  // }
-
-  // return;
+  // grid_rand(g, 0, 9);
   
   SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
   //--------------------------------------------------------------------------------------
@@ -179,16 +193,18 @@ int main(void)
   // Main game loop
   while (!WindowShouldClose())    // Detect window close button or ESC key
     {
-      // Update
-      //----------------------------------------------------------------------------------
-      // TODO: Update your variables here
-      //----------------------------------------------------------------------------------
       if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
 	Vector2 mousePos = GetMousePosition();
 	Pos pos = coords_to_pos(mousePos);
 	g = game_set_selection(g, pos);	
       }
-      
+
+      char keyPress = GetCharPressed();
+      Value val = char_to_value(keyPress);
+      if (val != V_INVALID) {
+	game_set_value(g, val);
+      }
+
       // Draw
       //----------------------------------------------------------------------------------
       BeginDrawing();
