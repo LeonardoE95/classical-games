@@ -4,6 +4,9 @@
 #include <time.h>
 #include <math.h>
 #include <stdint.h>
+#include <errno.h>
+#include <string.h>
+
 
 #define SCREEN_WIDTH  900
 #define SCREEN_HEIGHT 900
@@ -52,6 +55,7 @@ void game_close(Game g);
 Game game_set_selection(Game g, Pos pos);
 void game_set_value(Game g, Value value);
 
+int grid_init_from_file(const char *path);
 void grid_fill(Game g, Value val);
 void grid_rand(Game g, size_t low, size_t high);
 
@@ -87,9 +91,9 @@ Game game_set_selection(Game g, Pos pos) {
 }
 
 void game_set_value(Game g, Value value) {
-  if (!HAS_SELECTED_CELL(g) || value == V_INVALID) { return g; }
-  Pos select = g.select;
-  g.grid[select.y * g.cols + select.x] = value;
+  if (HAS_SELECTED_CELL(g) && (value != V_INVALID)) {
+    g.grid[g.select.y * g.cols + g.select.x] = value;
+  }
 }
 
 void grid_fill(Game g, Value val) {
@@ -106,6 +110,79 @@ void grid_rand(Game g, size_t low, size_t high) {
       g.grid[y * g.cols + x] = low + (rand() % (high - low));
     }
   }
+}
+
+Game game_init_from_file(const char *path) {
+  FILE *f = fopen(path,"r");
+
+  if (f == NULL) {
+    fprintf(stderr, "ERROR: could not open file %s: %s\n", path, strerror(errno));
+    exit(1);
+  }
+
+  char *line;
+  size_t len = 0;
+  size_t read;
+  
+  read = getline(&line, &len, f);
+
+  if (read == -1) {
+    fprintf(stderr, "ERROR: could not read line %d from %s: %s\n", 0, path, strerror(errno));
+    exit(1);
+  }
+    
+  char *rows_str = strtok(line, ",");
+  char *cols_str = strtok(NULL, ",");
+  char *null_str = strtok(NULL, ",");
+
+  if (!rows_str || !cols_str || null_str) {
+    fprintf(stderr, "ERROR: grid file not properly formatted %s\n", path);
+    exit(1);      
+  }
+
+  // NOTE: should more checks be needed here?
+  int rows, cols;  
+  rows = atoi(rows_str);
+  cols = atoi(cols_str);
+
+  if (!rows) {
+    fprintf(stderr, "ERROR: could not atoi rows value (%s)\n", rows_str);
+    exit(1);      
+  }
+
+  if (!cols) {
+    fprintf(stderr, "ERROR: could not atoi cols value (%s)\n", cols_str);
+    exit(1);      
+  }    
+
+  Game g = game_init(cols, rows);
+
+  // NOTE: probably more checks needed here
+  for (size_t y = 0; y < g.rows; y++) {
+    read = getline(&line, &len, f);
+
+    if (read == -1) {
+      fprintf(stderr, "ERROR: could not read line %d from %s: %s\n", y+1, path, strerror(errno));
+      exit(1);
+    }
+
+    for (size_t x = 0; x < g.cols; x++) {
+      char *value_str = strtok(x == 0 ? line : NULL, ",");
+      Value val;
+      if (*value_str == 'X') {
+	g.grid[y * g.cols + x] = V_NONE;
+      } else if ((val = char_to_value(*value_str)) != V_INVALID) {
+	g.grid[y * g.cols + x] = val;
+      } else {
+	fprintf(stderr, "ERROR: Invalid value found (%c) when reading file %s \n", *value_str, path);
+	exit(1);
+      }
+    }
+  }
+  
+  fclose(f);
+
+  return g;
 }
 
 Pos coords_to_pos(Vector2 vpos) {
@@ -184,7 +261,8 @@ int main(void)
   InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "sudoku");
   srand(time(NULL));
 
-  Game g = game_init(BOARD_COLS, BOARD_ROWS);
+  // Game g = game_init(BOARD_COLS, BOARD_ROWS);
+  Game g = game_init_from_file("./data/example.txt");
   // grid_rand(g, 0, 9);
   
   SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
