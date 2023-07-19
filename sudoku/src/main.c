@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include <string.h>
-
+#include <assert.h>
 
 #define SCREEN_WIDTH  900
 #define SCREEN_HEIGHT 900
@@ -17,8 +17,10 @@
 #define CELL_WIDTH ((SCREEN_WIDTH / BOARD_COLS))
 #define CELL_HEIGHT ((SCREEN_HEIGHT / BOARD_ROWS))
 
-// ---------------
-// structures
+#define FIXED_VALUE_COLOR BLACK
+#define DYNAMIC_VALUE_COLOR BLACK
+
+//----------------------------------------------------------------------------------
 
 typedef enum {
   V_NONE = 0,
@@ -32,31 +34,56 @@ typedef enum {
   V_8,
   V_9,
   V_INVALID,  
-} Value;
+} CellValue;
+
+typedef enum {
+  FIXED = 0, 
+  DYNAMIC
+} CellType;
+
+typedef struct {
+  CellValue value;
+  CellType type;
+} Cell;
 
 typedef struct {
   size_t x;
   size_t y;
 } Pos;
 
+typedef enum {
+  E_NONE = 0,
+  E_ROW,
+  E_COL,
+  E_SQUARE,
+} ErrorType;
+
+typedef struct {
+  ErrorType type;  
+  size_t index;  
+} Error;
+
 typedef struct {
   size_t cols;
   size_t rows;
-  Value *grid;
+  Cell *grid;
   
   Pos select;
+  Error error;
+  uint8_t victory;
 } Game;
 
-// ---------------
-// headers
+//----------------------------------------------------------------------------------
 
+Game game_init_from_file(const char *path);
 Game game_init(size_t cols, size_t rows);
 void game_close(Game g);
-Game game_set_selection(Game g, Pos pos);
-void game_set_value(Game g, Value value);
+Game game_check_and_set_selection(Game g, Pos pos);
+Game game_check_and_set_value(Game g, CellValue value, CellType type);
+Game game_check_and_set_error(Game g);
+Game game_check_and_set_victory(Game g);
 
-int grid_init_from_file(const char *path);
-void grid_fill(Game g, Value val);
+void grid_fill(Game g, CellValue val);
 void grid_rand(Game g, size_t low, size_t high);
 
 void grid_render_lines(Game g);
@@ -64,53 +91,125 @@ void grid_render_values(Game g);
 void game_render(Game g);
 
 Pos coords_to_pos(Vector2 vpos);
-Value char_to_value(char keyPress);
+CellValue char_to_value(char keyPress);
 
 #define HAS_SELECTED_CELL(g) (((g).select.x != -1) && ((g).select.y != -1))
+#define HAS_VALUE(c) (((c).value != V_INVALID) && ((c).value != V_NONE))
+#define CELL_IS_DYNAMIC(g, pos) ((g).grid[(pos).y * (g).cols + (pos).x].type == DYNAMIC)
+#define SELECTED_CELL_IS_DYNAMIC(g) CELL_IS_DYNAMIC((g), (g).select)
 
-// ---------------
-// Logic
+//----------------------------------------------------------------------------------
 
 Game game_init(size_t cols, size_t rows) {
   Game g = { 0 };
   g.cols = cols;
   g.rows = rows;
-  g.grid = calloc(cols * rows, sizeof(Value));
+  g.grid = calloc(cols * rows, sizeof(Cell));
   g.select = (Pos){-1, -1};
+  g.error = (Error){ E_NONE, 0 };  
   return g;
 }
 
 void game_close(Game g) { free(g.grid); }
 
-Game game_set_selection(Game g, Pos pos) {
-  // TODO: check if the position is legal. That is, we cannot simply
-  // change any square. It has to be a sqare on which we have control
-  // over.
-  g.select = pos;
+Game game_check_and_set_selection(Game g, Pos pos) {
+  // only select to dynamic cells
+  if (CELL_IS_DYNAMIC(g, pos)) {
+    g.select = pos;    
+  }
+
   return g;
 }
 
-void game_set_value(Game g, Value value) {
-  if (HAS_SELECTED_CELL(g) && (value != V_INVALID)) {
-    g.grid[g.select.y * g.cols + g.select.x] = value;
+Game game_check_and_set_value(Game g, CellValue value, CellType type) {
+  if (HAS_SELECTED_CELL(g) && SELECTED_CELL_IS_DYNAMIC(g) && (value != V_INVALID)) {
+    g.grid[g.select.y * g.cols + g.select.x] = (Cell){ value, type };
   }
+  return g;
 }
 
-void grid_fill(Game g, Value val) {
+Game game_check_and_set_error(Game g) {
+  g.error = (Error) { E_NONE, 0 };
+ 
+  // each row, colum and square must contain 9 distinct digits, from 1 through 9.
+  
+  // check rows
+  for(int y = 0; y < g.rows; y++) {
+    size_t seen[10] = { 0 };
+    for(int x = 0; x < g.cols; x++) {
+      Cell c = g.grid[y * g.cols + x];
+      if (HAS_VALUE(c)) {
+	seen[c.value] += 1;
+	if (seen[c.value] > 1) {
+	  g.error = (Error) { E_ROW, y };
+	}
+      }
+    }
+  }
+
+  // check cols
+  for(int x = 0; x < g.cols; x++) {
+    size_t seen[10] = { 0 };
+    for(int y = 0; y < g.rows; y++) {
+      Cell c = g.grid[y * g.cols + x];
+      if (HAS_VALUE(c)) {
+	seen[c.value] += 1;
+	if (seen[c.value] > 1) {
+	  g.error = (Error) { E_COL, x };
+	}
+      }
+    }
+  }
+
+  // TODO: check squares only if we have a square grid
+  // NOTE: for now we have hard-coded a value of 3
+  if (BOARD_COLS == BOARD_ROWS) {
+    for (int i = 0; i < 9; i++) {
+      size_t seen[10] = { 0 };
+
+      size_t start_y = floorf(i / 3) * 3;
+      size_t start_x = (i % 3) * 3;                
+
+      // printf("(%d, %d)\n", start_x, start_y);
+      for (size_t y = start_y; y < start_y + 3; y++) {
+	for (size_t x = start_x; x < start_x + 3; x++) {
+	  Cell c = g.grid[y * g.cols + x];
+	  if (HAS_VALUE(c)) {
+	    seen[c.value] += 1;
+	    if (seen[c.value] > 1) {
+	      g.error = (Error) { E_SQUARE, i };
+	    }
+	  }
+	}
+      }      
+    }    
+  }
+    
+  return g;
+};
+  
+Game game_check_and_set_victory(Game g) {
+  // TODO: check victory state. Simply count that all cells are non
+  // empty and that there are no errors. This should be enough.
+  return g;
+};
+
+void grid_fill(Game g, CellValue val) {
   for (size_t y = 0; y < g.rows; y++) {
     for (size_t x = 0; x < g.cols; x++) {
-      g.grid[y * g.cols + x] = V_NONE;
+      g.grid[y * g.cols + x] = (Cell){ V_NONE, DYNAMIC };
     }
   }
 }
 
-void grid_rand(Game g, size_t low, size_t high) {
-  for (size_t y = 0; y < g.rows; y++) {
-    for (size_t x = 0; x < g.cols; x++) {
-      g.grid[y * g.cols + x] = low + (rand() % (high - low));
-    }
-  }
-}
+// TODO: implement this properly
+// void grid_rand(Game g, size_t low, size_t high) {
+//   for (size_t y = 0; y < g.rows; y++) {
+//     for (size_t x = 0; x < g.cols; x++) {
+//       g.grid[y * g.cols + x] = low + (rand() % (high - low));      
+//     }
+//   }
+// }
 
 Game game_init_from_file(const char *path) {
   FILE *f = fopen(path,"r");
@@ -156,7 +255,7 @@ Game game_init_from_file(const char *path) {
   }    
 
   Game g = game_init(cols, rows);
-
+  
   // NOTE: probably more checks needed here
   for (size_t y = 0; y < g.rows; y++) {
     read = getline(&line, &len, f);
@@ -168,11 +267,11 @@ Game game_init_from_file(const char *path) {
 
     for (size_t x = 0; x < g.cols; x++) {
       char *value_str = strtok(x == 0 ? line : NULL, ",");
-      Value val;
+      CellValue val;
       if (*value_str == 'X') {
-	g.grid[y * g.cols + x] = V_NONE;
+	g.grid[y * g.cols + x] = (Cell){ V_NONE, DYNAMIC };
       } else if ((val = char_to_value(*value_str)) != V_INVALID) {
-	g.grid[y * g.cols + x] = val;
+	g.grid[y * g.cols + x] = (Cell){ val, FIXED };
       } else {
 	fprintf(stderr, "ERROR: Invalid value found (%c) when reading file %s \n", *value_str, path);
 	exit(1);
@@ -185,6 +284,8 @@ Game game_init_from_file(const char *path) {
   return g;
 }
 
+//----------------------------------------------------------------------------------
+
 Pos coords_to_pos(Vector2 vpos) {
   Pos pos = { 0 };
   pos.x = floorf(vpos.x / CELL_WIDTH);
@@ -192,16 +293,15 @@ Pos coords_to_pos(Vector2 vpos) {
   return pos;
 }
 
-Value char_to_value(char keyPress) {
+CellValue char_to_value(char keyPress) {
   if (keyPress < '0' || keyPress > '9') {
     return V_INVALID;
   } else {
-    return (Value)(keyPress - '0');
+    return (CellValue)(keyPress - '0');
   }
 }
 
-// ---------------
-// Rendering
+//----------------------------------------------------------------------------------
 
 void grid_render_lines(Game g) {
 
@@ -228,16 +328,49 @@ void grid_render_lines(Game g) {
 void grid_render_values(Game g) {
   for (size_t y = 0; y < g.rows; y++) {
     for (size_t x = 0; x < g.cols; x++) {
-      Value val = g.grid[y * g.cols + x];
+      CellValue val = g.grid[y * g.cols + x].value;
+      CellType type = g.grid[y * g.cols + x].type;
       if (val != V_NONE) {
 	char text[80];
 	sprintf(text, "%u", val);
 	size_t posX = floorf(x * CELL_WIDTH + CELL_WIDTH / 3);
 	size_t posY = floorf(y * CELL_HEIGHT + CELL_HEIGHT / 3);
-	DrawText(text, posX, posY, 50, BLACK);
+
+	DrawText(text, posX, posY, 50, type == FIXED ? FIXED_VALUE_COLOR : DYNAMIC_VALUE_COLOR);
       }
     }
   }
+}
+
+void grid_render_error(Game g) {
+  size_t posX, posY;  
+  switch(g.error.type)  {
+  case E_NONE:
+    break;
+    
+  case E_ROW:
+    posX = 0;
+    posY = g.error.index * CELL_HEIGHT;
+    DrawRectangle(posX, posY, BOARD_COLS*CELL_WIDTH, CELL_HEIGHT, RED);
+    break;
+
+  case E_COL:
+    posX = g.error.index * CELL_WIDTH;
+    posY = 0;
+    DrawRectangle(posX, posY, CELL_WIDTH, BOARD_ROWS*CELL_HEIGHT, RED);
+    break;
+
+  case E_SQUARE:
+    posX = (g.error.index % 3) * 3 * CELL_WIDTH;
+    posY = floorf(g.error.index / 3) * 3 * CELL_HEIGHT;    
+    DrawRectangle(posX, posY, CELL_WIDTH*3, CELL_HEIGHT*3, RED);
+    break;
+
+  default:
+    assert("Unreachable\n");
+    break;
+  }
+  
 }
 
 void game_render(Game g) {
@@ -246,59 +379,57 @@ void game_render(Game g) {
     size_t posY = g.select.y * CELL_HEIGHT;
     DrawRectangle(posX, posY, CELL_WIDTH, CELL_HEIGHT, LIGHTGRAY);      
   }
-  
+
+  grid_render_error(g);      
   grid_render_lines(g);
   grid_render_values(g);
 }
 
-//------------------------------------------------------------------------------------
-// Program main entry posize_t
-//------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
 int main(void)
 {
-  // Initialization
-  //--------------------------------------------------------------------------------------
   InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "sudoku");
-  srand(time(NULL));
-
+  SetTargetFPS(60);
+  
   // Game g = game_init(BOARD_COLS, BOARD_ROWS);
-  Game g = game_init_from_file("./data/example.txt");
+  // srand(time(NULL));  
   // grid_rand(g, 0, 9);
   
-  SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
-  //--------------------------------------------------------------------------------------
-
-  // Main game loop
-  while (!WindowShouldClose())    // Detect window close button or ESC key
+  Game g = game_init_from_file("./data/example2.txt");
+  
+  while (!WindowShouldClose())
     {
+      // Manage state
+      //----------------------------------------------------------------------------------
+
+      // Select a cell
       if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
 	Vector2 mousePos = GetMousePosition();
 	Pos pos = coords_to_pos(mousePos);
-	g = game_set_selection(g, pos);	
+	// printf("(%d, %d)\n", pos.x, pos.y);
+	g = game_check_and_set_selection(g, pos);
       }
 
+      // Write a number
       char keyPress = GetCharPressed();
-      Value val = char_to_value(keyPress);
-      if (val != V_INVALID) {
-	game_set_value(g, val);
-      }
+      CellValue val = char_to_value(keyPress);
+      game_check_and_set_value(g, val, DYNAMIC);
 
-      // Draw
-      //----------------------------------------------------------------------------------
+      // update internal state
+      g = game_check_and_set_error(g);
+      g = game_check_and_set_victory(g);
+      
+      // Render
+      //----------------------------------------------------------------------------------      
       BeginDrawing();
       ClearBackground(RAYWHITE);
-      
       game_render(g);
-      
       EndDrawing();
-      //----------------------------------------------------------------------------------
     }
 
-  // De-Initialization
   game_close(g);  
-  //--------------------------------------------------------------------------------------
-  CloseWindow();        // Close window and OpenGL context
-  //--------------------------------------------------------------------------------------
+  CloseWindow();
 
   return 0;
 }
