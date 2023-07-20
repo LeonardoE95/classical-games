@@ -8,6 +8,8 @@
 #include <string.h>
 #include <assert.h>
 
+#define BOARD_PATH "./data/board1.txt"
+
 #define SCREEN_WIDTH  900
 #define SCREEN_HEIGHT 900
 
@@ -52,6 +54,14 @@ typedef struct {
 } Pos;
 
 typedef enum {
+  D_NONE = 0,
+  D_UP,
+  D_DOWN,  
+  D_RIGHT,
+  D_LEFT,    
+} Dir;
+
+typedef enum {
   E_NONE = 0,
   E_ROW,
   E_COL,
@@ -92,6 +102,7 @@ void game_render(Game g);
 
 Pos coords_to_pos(Vector2 vpos);
 CellValue char_to_value(char keyPress);
+Pos next_pos(Game g, Dir dir);
 
 #define HAS_SELECTED_CELL(g) (((g).select.x != -1) && ((g).select.y != -1))
 #define HAS_VALUE(c) (((c).value != V_INVALID) && ((c).value != V_NONE))
@@ -301,6 +312,51 @@ CellValue char_to_value(char keyPress) {
   }
 }
 
+// https://stackoverflow.com/questions/14997165/fastest-way-to-get-a-positive-modulo-in-c-c
+int positive_mod(int a, int n) {
+  return ((a % n) + n) % n;
+}
+
+Pos next_pos(Game g, Dir dir) {
+  // remember to treat coordinates 'modulo' the limits of the board,
+  // so that if I go to the far right, I end up in the far left, and
+  // same thing applies to up and down.
+
+  Pos oldPos = g.select;
+  Pos newPos = { 0 };
+  
+  switch(dir) {
+  case D_NONE: {
+    newPos = oldPos;
+    break;
+  }
+  case D_UP: {
+    newPos.x = oldPos.x;
+    newPos.y = positive_mod(oldPos.y - 1, g.rows);
+    break;
+  }
+  case D_DOWN: {
+    newPos.x = oldPos.x;
+    newPos.y = positive_mod(oldPos.y + 1, g.rows);    
+    break;
+  }
+  case D_LEFT: {
+    newPos.x = positive_mod(oldPos.x - 1, g.cols);
+    newPos.y = oldPos.y;
+    break;
+  }
+  case D_RIGHT: {
+    newPos.x = positive_mod(oldPos.x + 1, g.cols);
+    newPos.y = oldPos.y;
+    break;
+  }
+  default:
+    assert(0 && "Unreachable\n");
+  }
+
+  return newPos;
+}
+
 //----------------------------------------------------------------------------------
 
 void grid_render_lines(Game g) {
@@ -333,8 +389,8 @@ void grid_render_values(Game g) {
       if (val != V_NONE) {
 	char text[80];
 	sprintf(text, "%u", val);
-	size_t posX = floorf(x * CELL_WIDTH + CELL_WIDTH / 3);
-	size_t posY = floorf(y * CELL_HEIGHT + CELL_HEIGHT / 3);
+	size_t posX = floorf(x * CELL_WIDTH + 0.35f*CELL_WIDTH);
+	size_t posY = floorf(y * CELL_HEIGHT + 0.30f*CELL_HEIGHT);
 
 	DrawText(text, posX, posY, 50, type == FIXED ? FIXED_VALUE_COLOR : DYNAMIC_VALUE_COLOR);
       }
@@ -367,7 +423,7 @@ void grid_render_error(Game g) {
     break;
 
   default:
-    assert("Unreachable\n");
+    assert(0 && "Unreachable\n");
     break;
   }
   
@@ -396,19 +452,36 @@ int main(void)
   // srand(time(NULL));  
   // grid_rand(g, 0, 9);
   
-  Game g = game_init_from_file("./data/example2.txt");
+  Game g = game_init_from_file(BOARD_PATH);
   
   while (!WindowShouldClose())
     {
       // Manage state
       //----------------------------------------------------------------------------------
 
-      // Select a cell
+      // select a cell with mouse
       if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
 	Vector2 mousePos = GetMousePosition();
 	Pos pos = coords_to_pos(mousePos);
-	// printf("(%d, %d)\n", pos.x, pos.y);
 	g = game_check_and_set_selection(g, pos);
+      }
+
+      // update selected cell with keyboard
+      if (HAS_SELECTED_CELL(g)) {
+	Dir d = D_NONE;
+	
+	if (IsKeyPressed(KEY_UP)) {
+	  d = D_UP;
+	} else if (IsKeyPressed(KEY_DOWN)) {
+	  d = D_DOWN;
+	} else if (IsKeyPressed(KEY_RIGHT)) {
+	  d = D_RIGHT;
+	} else if (IsKeyPressed(KEY_LEFT)) {
+	  d = D_LEFT;
+	}
+	
+	Pos newPos = next_pos(g, d);
+	g = game_check_and_set_selection(g, newPos);
       }
 
       // Write a number
