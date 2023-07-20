@@ -8,7 +8,7 @@
 #include <string.h>
 #include <assert.h>
 
-#define BOARD_PATH "./data/board1.txt"
+#define BOARD_PATH "./data/sol1.txt"
 
 #define SCREEN_WIDTH  900
 #define SCREEN_HEIGHT 900
@@ -108,6 +108,7 @@ Pos next_pos(Game g, Dir dir);
 #define HAS_VALUE(c) (((c).value != V_INVALID) && ((c).value != V_NONE))
 #define CELL_IS_DYNAMIC(g, pos) ((g).grid[(pos).y * (g).cols + (pos).x].type == DYNAMIC)
 #define SELECTED_CELL_IS_DYNAMIC(g) CELL_IS_DYNAMIC((g), (g).select)
+#define IS_OVER(g) ((g).victory == 1)
 
 //----------------------------------------------------------------------------------
 
@@ -172,7 +173,7 @@ Game game_check_and_set_error(Game g) {
     }
   }
 
-  // TODO: check squares only if we have a square grid
+  // TODO: check squares only if we have a special type of square grid
   // NOTE: for now we have hard-coded a value of 3
   if (BOARD_COLS == BOARD_ROWS) {
     for (int i = 0; i < 9; i++) {
@@ -200,8 +201,19 @@ Game game_check_and_set_error(Game g) {
 };
   
 Game game_check_and_set_victory(Game g) {
-  // TODO: check victory state. Simply count that all cells are non
-  // empty and that there are no errors. This should be enough.
+  if (g.error.type != E_NONE) {
+    g.victory = 0;
+  } else {
+    g.victory = 1;
+    for (int y = 0; y < g.rows; y++) {
+      for (int x = 0; x < g.cols; x++) {
+	if (g.grid[y * g.cols + x].value == V_NONE) {
+	  g.victory = 0;
+	}
+      }
+    }
+  }
+  
   return g;
 };
 
@@ -430,13 +442,15 @@ void grid_render_error(Game g) {
 }
 
 void game_render(Game g) {
-  if (HAS_SELECTED_CELL(g)) {
+  if (IS_OVER(g)) {
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GREEN);    
+  } else if (HAS_SELECTED_CELL(g)) {
     size_t posX = g.select.x * CELL_WIDTH;
     size_t posY = g.select.y * CELL_HEIGHT;
     DrawRectangle(posX, posY, CELL_WIDTH, CELL_HEIGHT, LIGHTGRAY);      
   }
 
-  grid_render_error(g);      
+  grid_render_error(g);
   grid_render_lines(g);
   grid_render_values(g);
 }
